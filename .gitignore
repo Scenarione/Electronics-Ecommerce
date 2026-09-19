@@ -1,0 +1,16 @@
+.env
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+node_modules/
+dist/
+test-results/
+playwright-report/
+*.log
+.tmp/
+*.tsbuildinfo
+.ruff_cache/
+# The UI is being designed after Checkpoint 1 and is intentionally excluded
+# from the CP1 submission commit.
+/frontend/
