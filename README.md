@@ -211,7 +211,7 @@ The backend suite contains 14 integration tests using isolated `parts_store_test
 
 | Responsibility | Team member / student ID |
 |---|---|
-| PostgreSQL, checkout and migrations | เมธัส รัตนบุรี / 670615033 |
-| MongoDB, catalog and seed data | โกเมทย์ ศศิสนธิ์ / 670615019 |
-| REST API and authentication | วรินทร โตศักดิ์ / 670615034 |
-| Docker, tests and documentation | วรินทร โตศักดิ์ / 670615034 |
+| PostgreSQL, checkout and migrations | METHAS RUTTANABUREE / 670615033 |
+| MongoDB, catalog and seed data | KOMET SASISON / 670615019 |
+| REST API and authentication | WARINTHON TOSAK / 670615034 |
+| Docker, tests and documentation | WARINTHON TOSAK / 670615034 |
