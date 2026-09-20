@@ -1,3 +1,4 @@
+"""FastAPI application setup, middleware, and shared error handling."""
 import logging
 
 from fastapi import FastAPI, HTTPException, Request
@@ -12,11 +13,13 @@ from .db import SessionLocal, mongo_client
 
 app = FastAPI(title="Circuit Supply API", version="1.0.0")
 logger = logging.getLogger("store")
+# Register each feature router with the main application.
 for router in (accounts.router, catalog.router, orders.router):
     app.include_router(router)
 
 
 def error(status, message):
+    """Return errors in one consistent JSON structure."""
     return JSONResponse(
         status_code=status, content={"error": {"status": status, "message": message}}
     )
@@ -24,7 +27,7 @@ def error(status, message):
 
 @app.middleware("http")
 async def same_origin(request: Request, call_next):
-    # Protect login/registration too, before a session CSRF token exists.
+    # Protect state-changing requests, including login and registration.
     if request.method not in ("GET", "HEAD", "OPTIONS"):
         origin = request.headers.get("origin")
         if request.headers.get("sec-fetch-site") == "cross-site" or (
@@ -32,6 +35,7 @@ async def same_origin(request: Request, call_next):
         ):
             return error(403, "Cross-origin writes are not allowed")
     response = await call_next(request)
+    # These headers reduce content-sniffing and caching of API responses.
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Cache-Control"] = "no-store"
     return response
@@ -44,6 +48,7 @@ async def http_error(request, exc):
 
 @app.exception_handler(RequestValidationError)
 async def validation_error(request, exc):
+    # Convert Pydantic validation details into a compact client-facing message.
     messages = [f"{'.'.join(str(v) for v in e['loc'])}: {e['msg']}" for e in exc.errors()]
     return error(400, "; ".join(messages))
 
@@ -57,12 +62,14 @@ async def conflict_error(request, exc):
 @app.exception_handler(SQLAlchemyError)
 @app.exception_handler(PyMongoError)
 async def database_error(request, exc):
+    # Log the exception type internally without exposing database details to clients.
     logger.error("Database operation failed: %s", type(exc).__name__)
     return error(503, "A database is temporarily unavailable. Please retry.")
 
 
 @app.get("/api/v1/health")
 def health():
+    """Check connectivity to both database systems."""
     with SessionLocal() as db:
         db.execute(text("SELECT 1"))
     mongo_client.admin.command("ping")
