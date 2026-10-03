@@ -51,6 +51,7 @@ def clean_test_data():
             )
         )
     catalog.products.delete_many({})
+    catalog.orders.delete_many({})
 
 
 @pytest.fixture
