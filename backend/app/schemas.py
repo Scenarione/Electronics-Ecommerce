@@ -1,6 +1,6 @@
 from decimal import Decimal
 from typing import Literal
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, HttpUrl, field_validator
 
@@ -11,7 +11,7 @@ class StrictModel(BaseModel):
 
 class Register(StrictModel):
     email: EmailStr
-    password: str = Field(min_length=10, max_length=128)
+    password: str = Field(min_length=8, max_length=128)
     name: str = Field(min_length=1, max_length=120)
 
     @field_validator("email")
@@ -30,7 +30,7 @@ class Profile(StrictModel):
 
 
 class ProductInput(StrictModel):
-    id: UUID
+    id: UUID = Field(default_factory=uuid4)
     sku: str = Field(min_length=1, max_length=60, pattern=r"^[A-Za-z0-9_-]+$")
     slug: str = Field(min_length=1, max_length=200, pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
     name: str = Field(min_length=1, max_length=200)

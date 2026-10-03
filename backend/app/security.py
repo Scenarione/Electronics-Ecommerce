@@ -57,12 +57,19 @@ def create_session(db: Session, user: User, response: Response) -> dict[str, Any
 def current_user(request: Request, db: Session = Depends(get_db)) -> User:
     """Resolve the current session and enforce CSRF protection on writes."""
     token = request.cookies.get(SESSION_COOKIE)
+    using_bearer = False
+    if not token:
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            token = auth_header[7:].strip()
+            using_bearer = True
+
     auth = db.get(AuthSession, digest(token)) if token else None
 
     if not auth or auth.expires_at <= now():
         raise HTTPException(401, "Please sign in")
 
-    if request.method not in SAFE_METHODS:
+    if not using_bearer and request.method not in SAFE_METHODS:
         csrf_token = request.headers.get("X-CSRF-Token", "")
         if not secrets.compare_digest(csrf_token, auth.csrf_token):
             raise HTTPException(403, "Invalid CSRF token")

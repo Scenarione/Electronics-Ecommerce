@@ -65,9 +65,7 @@ def logout(
 
 
 @router.get("/users/{user_id}")
-def get_user(user_id: UUID, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    if user.id != user_id and user.role != "admin":
-        raise HTTPException(403, "This account is private")
+def get_user(user_id: UUID, db: Session = Depends(get_db)):
     target = db.get(User, user_id)
     if not target:
         raise HTTPException(404, "User not found")
