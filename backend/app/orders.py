@@ -52,10 +52,14 @@ def order_data(db, order, details=True):
 def checkout(
     body: Checkout,
     response: Response,
-    idempotency_key: str = Header(min_length=8, max_length=100),
+    idempotency_key: str | None = Header(None, max_length=100),
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ):
+    if not idempotency_key:
+        idempotency_key = f"auto-{uuid4()}"
+    elif len(idempotency_key) < 8:
+        raise HTTPException(400, "Idempotency-Key header must be at least 8 characters")
     successful = simulate_payment(body.simulation)
     quantities = {}
     for line in body.items:
@@ -144,6 +148,29 @@ def checkout(
         )
     )
     db.commit()
+    catalog.orders.replace_one(
+        {"_id": str(order.id)},
+        {
+            "_id": str(order.id),
+            "user_id": str(user.id),
+            "status": order.status,
+            "total": float(total),
+            "currency": order.currency,
+            "shipping_address": body.shipping_address.model_dump(),
+            "items": [
+                {
+                    "item_id": str(item.id),
+                    "sku": item.sku,
+                    "name": docs[str(item.id)]["name"],
+                    "quantity": quantities[item.id],
+                    "unit_price": float(item.price),
+                }
+                for item in items
+            ],
+            "created_at": order.created_at,
+        },
+        upsert=True,
+    )
     return order_data(db, order)
 
 
@@ -188,4 +215,5 @@ def ship_order(order_id: UUID, user: User = Depends(admin), db: Session = Depend
         raise HTTPException(409, "Only paid orders can be shipped")
     order.status = "shipped"
     db.commit()
+    catalog.orders.update_one({"_id": str(order_id)}, {"$set": {"status": "shipped"}})
     return order_data(db, order)
