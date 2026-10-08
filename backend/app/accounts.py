@@ -27,9 +27,33 @@ def register(body: Register, response: Response, db: Session = Depends(get_db)):
     if len(body.password) < MIN_PASSWORD_LENGTH:
         raise HTTPException(400, f"Password must be at least {MIN_PASSWORD_LENGTH} characters")
 
-    user = User(email=email, name=body.name.strip(), password_hash=passwords.hash(body.password))
+    full_name = (
+        body.name.strip()
+        if body.name
+        else f"{body.first_name or ''} {body.last_name or ''}".strip()
+    )
+    user = User(
+        email=email,
+        name=full_name,
+        first_name=body.first_name.strip() if body.first_name else None,
+        last_name=body.last_name.strip() if body.last_name else None,
+        password_hash=passwords.hash(body.password),
+    )
     db.add(user)
     db.flush()
+
+    # CP2 Dual Write: write to legacy column 'name' in PostgreSQL if it exists
+    if full_name:
+        try:
+            from sqlalchemy import text
+            with db.begin_nested():
+                db.execute(
+                    text("UPDATE users SET name = :name WHERE id = :id"),
+                    {"name": full_name, "id": user.id},
+                )
+        except Exception:
+            pass
+
     result = create_session(db, user, response)
     db.commit()
     return result
@@ -48,8 +72,8 @@ def login(body: Login, response: Response, db: Session = Depends(get_db)):
 
 
 @router.get("/auth/me")
-def me(request: Request, user: User = Depends(current_user)):
-    return {"user": user_data(user), "csrf_token": request.state.auth.csrf_token}
+def me(request: Request, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    return {"user": user_data(user, db), "csrf_token": request.state.auth.csrf_token}
 
 
 @router.post("/auth/logout", status_code=204)
@@ -69,11 +93,31 @@ def get_user(user_id: UUID, db: Session = Depends(get_db)):
     target = db.get(User, user_id)
     if not target:
         raise HTTPException(404, "User not found")
-    return user_data(target)
+    return user_data(target, db)
 
 
 @router.patch("/users/me")
 def update_me(body: Profile, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    user.name = body.name.strip()
+    if body.name is not None:
+        user.name = body.name.strip()
+    if body.first_name is not None:
+        user.first_name = body.first_name.strip()
+    if body.last_name is not None:
+        user.last_name = body.last_name.strip()
+    db.flush()
+
+    # CP2 Dual Write: sync legacy column 'name' in PostgreSQL if it exists
+    full_name = user.name or f"{user.first_name or ''} {user.last_name or ''}".strip()
+    if full_name:
+        try:
+            from sqlalchemy import text
+            with db.begin_nested():
+                db.execute(
+                    text("UPDATE users SET name = :name WHERE id = :id"),
+                    {"name": full_name, "id": user.id},
+                )
+        except Exception:
+            pass
+
     db.commit()
-    return user_data(user)
+    return user_data(user, db)

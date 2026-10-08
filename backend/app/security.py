@@ -26,9 +26,34 @@ def digest(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
-def user_data(user: User) -> dict[str, Any]:
-    """Expose safe user fields without returning password or session data."""
-    return {"id": str(user.id), "email": user.email, "name": user.name, "role": user.role}
+def user_data(user: User, db: Session | None = None) -> dict[str, Any]:
+    """Expose safe user fields without returning password or session data.
+    
+    In CP2, smoothly supports reading from new fields (first_name, last_name)
+    with seamless fallback to legacy column 'name' for historical records.
+    """
+    display_name = user.name
+    if not display_name and db:
+        try:
+            from sqlalchemy import text
+            with db.begin_nested():
+                legacy = db.scalar(text("SELECT name FROM users WHERE id = :id"), {"id": user.id})
+                if legacy:
+                    display_name = str(legacy).strip()
+        except Exception:
+            pass
+
+    display_name = display_name or f"{user.first_name or ''} {user.last_name or ''}".strip()
+    first = user.first_name or (display_name.split()[0] if display_name else "")
+    last = user.last_name or (" ".join(display_name.split()[1:]) if len(display_name.split()) > 1 else "")
+    return {
+        "id": str(user.id),
+        "email": user.email,
+        "name": display_name,
+        "first_name": first,
+        "last_name": last,
+        "role": user.role,
+    }
 
 
 def create_session(db: Session, user: User, response: Response) -> dict[str, Any]:
