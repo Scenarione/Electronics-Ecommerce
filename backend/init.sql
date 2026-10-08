@@ -91,4 +91,4 @@ CREATE TABLE IF NOT EXISTS alembic_version (
     version_num VARCHAR(32) NOT NULL,
     CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num)
 );
-INSERT INTO alembic_version (version_num) VALUES ('7d477174c785') ON CONFLICT DO NOTHING;
+INSERT INTO alembic_version (version_num) VALUES ('9b106b057c41') ON CONFLICT DO NOTHING;
