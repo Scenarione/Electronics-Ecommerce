@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
+from .builder_catalog import BUILDER_PARTS, ensure_builder_item
 from .db import catalog, get_db
 from .models import Inventory, Order, OrderItem, Payment, SellableItem, User
 from .payments import simulate_payment
@@ -13,6 +14,7 @@ from .schemas import Checkout
 from .security import admin, current_user
 
 router = APIRouter(prefix="/api/v1", tags=["orders"])
+
 
 
 def order_data(db, order, details=True):
@@ -25,6 +27,16 @@ def order_data(db, order, details=True):
         "shipping_address": order.shipping_address,
     }
     if details:
+        # CP3 Query Projection: project only needed line item columns directly from disk
+        lines_stmt = (
+            select(
+                OrderItem.item_id,
+                OrderItem.name,
+                OrderItem.sku,
+                OrderItem.quantity,
+                OrderItem.unit_price,
+            ).where(OrderItem.order_id == order.id)
+        )
         result["items"] = [
             {
                 "item_id": str(line.item_id),
@@ -33,16 +45,21 @@ def order_data(db, order, details=True):
                 "quantity": line.quantity,
                 "unit_price": str(line.unit_price),
             }
-            for line in db.scalars(select(OrderItem).where(OrderItem.order_id == order.id))
+            for line in db.execute(lines_stmt).all()
         ]
-        payment = db.scalar(select(Payment).where(Payment.order_id == order.id))
+        # CP3 Query Projection: project only payment status columns
+        payment_stmt = (
+            select(Payment.outcome, Payment.reference, Payment.amount)
+            .where(Payment.order_id == order.id)
+        )
+        pay = db.execute(payment_stmt).first()
         result["payment"] = (
             {
-                "outcome": payment.outcome,
-                "reference": payment.reference,
-                "amount": str(payment.amount),
+                "outcome": pay.outcome,
+                "reference": pay.reference,
+                "amount": str(pay.amount),
             }
-            if payment
+            if pay
             else None
         )
     return result
@@ -88,8 +105,17 @@ def checkout(
         doc["_id"]: doc
         for doc in catalog.products.find({"_id": {"$in": [str(k) for k in quantities]}})
     }
+    for k in quantities:
+        str_k = str(k)
+        if str_k not in docs and str_k in BUILDER_PARTS:
+            ensure_builder_item(db, k)
+            docs[str_k] = {
+                "_id": str_k,
+                "name": BUILDER_PARTS[str_k]["name"],
+            }
     if len(docs) != len(quantities):
         raise HTTPException(404, "A product is no longer available")
+
     items = list(
         db.scalars(
             select(SellableItem)
@@ -178,14 +204,35 @@ def checkout(
 def my_orders(
     page: int = Query(1, ge=1), user: User = Depends(current_user), db: Session = Depends(get_db)
 ):
-    orders = db.scalars(
-        select(Order)
+    # CP3 Query Projection: fetch only required summary fields directly from disk,
+    # bypassing heavy ORM entity graphs, identity map tracking, and unneeded columns.
+    stmt = (
+        select(
+            Order.id,
+            Order.status,
+            Order.total,
+            Order.currency,
+            Order.created_at,
+            Order.shipping_address,
+        )
         .where(Order.user_id == user.id)
         .order_by(Order.created_at.desc())
         .offset((page - 1) * 20)
         .limit(20)
     )
-    return {"items": [order_data(db, order, False) for order in orders], "page": page}
+    rows = db.execute(stmt).all()
+    items = [
+        {
+            "id": str(r.id),
+            "status": r.status,
+            "total": str(r.total),
+            "currency": r.currency,
+            "created_at": r.created_at,
+            "shipping_address": r.shipping_address,
+        }
+        for r in rows
+    ]
+    return {"items": items, "page": page}
 
 
 @router.get("/orders/{order_id}")
@@ -200,10 +247,33 @@ def get_order(order_id: UUID, user: User = Depends(current_user), db: Session = 
 def all_orders(
     page: int = Query(1, ge=1), user: User = Depends(admin), db: Session = Depends(get_db)
 ):
-    orders = db.scalars(
-        select(Order).order_by(Order.created_at.desc()).offset((page - 1) * 20).limit(20)
+    # CP3 Query Projection: select only required columns for administrative listing
+    stmt = (
+        select(
+            Order.id,
+            Order.status,
+            Order.total,
+            Order.currency,
+            Order.created_at,
+            Order.shipping_address,
+        )
+        .order_by(Order.created_at.desc())
+        .offset((page - 1) * 20)
+        .limit(20)
     )
-    return {"items": [order_data(db, order, False) for order in orders], "page": page}
+    rows = db.execute(stmt).all()
+    items = [
+        {
+            "id": str(r.id),
+            "status": r.status,
+            "total": str(r.total),
+            "currency": r.currency,
+            "created_at": r.created_at,
+            "shipping_address": r.shipping_address,
+        }
+        for r in rows
+    ]
+    return {"items": items, "page": page}
 
 
 @router.post("/admin/orders/{order_id}/ship")

@@ -32,10 +32,22 @@ class User(Base):
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     email: Mapped[str] = mapped_column(String(254), unique=True)
     password_hash: Mapped[str] = mapped_column(Text)
-    name: Mapped[str] = mapped_column(String(120))
+    first_name: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    last_name: Mapped[str | None] = mapped_column(String(60), nullable=True)
     role: Mapped[str] = mapped_column(String(20), default="customer")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     __table_args__ = (CheckConstraint("role IN ('customer','admin')"),)
+
+    @property
+    def name(self) -> str | None:
+        parts = [p for p in (self.first_name, self.last_name) if p]
+        return " ".join(parts) if parts else None
+
+    @name.setter
+    def name(self, value: str | None) -> None:
+        if value:
+            from .name_utils import split_name
+            self.first_name, self.last_name = split_name(value)
 
 
 class AuthSession(Base):
