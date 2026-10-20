@@ -8,12 +8,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from .builder_catalog import BUILDER_PARTS, ensure_builder_item
 from .db import catalog, get_db
 from .models import Inventory, SellableItem, User, now
 from .schemas import CommerceEdit, ProductEdit, ProductInput, StockAdjustment
 from .security import admin
 
 router = APIRouter(prefix="/api/v1", tags=["catalog"])
+
 
 
 def validate_specs(category, specs):
@@ -50,20 +52,59 @@ def serialize_product(doc, item, stock):
     }
 
 
-def product_list(db, page, page_size, category, brand, q, filters, include_inactive=False):
-    statement = select(SellableItem, Inventory).join(Inventory)
+def serialize_product_row(doc, row):
+    return {
+        **{k: v for k, v in doc.items() if k != "_id"},
+        "id": str(row.id),
+        "price": str(row.price),
+        "currency": row.currency,
+        "quantity": row.quantity,
+        "active": row.active,
+    }
+
+
+def product_list(
+    db,
+    page,
+    page_size,
+    category,
+    brand,
+    q,
+    filters,
+    min_price=None,
+    max_price=None,
+    include_inactive=False,
+):
+    # CP3 Query Projection & Memory Optimization:
+    # Instead of scanning the entire database into heavy ORM entity graphs,
+    # we fetch active product IDs via fast index scan, paginate in MongoDB,
+    # and project ONLY the scalar fields needed for the current page from disk.
+    query = {}
+    statement = select(SellableItem.id)
     if not include_inactive:
         statement = statement.where(
             SellableItem.active.is_(True), SellableItem.catalog_pending.is_(False)
         )
-    commercial = {str(item.id): (item, stock) for item, stock in db.execute(statement)}
-    query = {"_id": {"$in": list(commercial)}}
+    if min_price is not None:
+        statement = statement.where(SellableItem.price >= min_price)
+    if max_price is not None:
+        statement = statement.where(SellableItem.price <= max_price)
+    matching_ids = [str(uid) for uid in db.scalars(statement).all()]
+    query["_id"] = {"$in": matching_ids}
+
     if category:
         query["category"] = category
     if brand:
         query["brand"] = brand
     if q:
-        query["$text"] = {"$search": q}
+        clean_q = q.strip()
+        direct_match = catalog.products.find_one(
+            {"$or": [{"name": clean_q}, {"sku": clean_q}, {"slug": clean_q}]}
+        )
+        if direct_match and direct_match["_id"] in matching_ids:
+            query["_id"] = direct_match["_id"]
+        else:
+            query["$text"] = {"$search": q}
     if filters:
         try:
             values = json.loads(filters)
@@ -82,9 +123,45 @@ def product_list(db, page, page_size, category, brand, q, filters, include_inact
                 raise HTTPException(400, "Numeric specification filter required")
             query[f"specifications.{key}"] = value
     count = catalog.products.count_documents(query)
-    docs = catalog.products.find(query).sort("_id", 1).skip((page - 1) * page_size).limit(page_size)
+    if "$text" in query:
+        docs = list(
+            catalog.products.find(query, {"score": {"$meta": "textScore"}})
+            .sort([("score", {"$meta": "textScore"}), ("_id", 1)])
+            .skip((page - 1) * page_size)
+            .limit(page_size)
+        )
+    else:
+        docs = list(
+            catalog.products.find(query)
+            .sort("_id", 1)
+            .skip((page - 1) * page_size)
+            .limit(page_size)
+        )
+
+    if not docs:
+        return {"items": [], "total": count, "page": page, "page_size": page_size}
+
+    # Query Projection: fetch ONLY the 5 required columns for ONLY the items on this page
+    page_uuids = [UUID(doc["_id"]) for doc in docs]
+    projected_stmt = (
+        select(
+            SellableItem.id,
+            SellableItem.price,
+            SellableItem.currency,
+            SellableItem.active,
+            Inventory.quantity,
+        )
+        .join(Inventory, Inventory.item_id == SellableItem.id)
+        .where(SellableItem.id.in_(page_uuids))
+    )
+    commercial = {str(row.id): row for row in db.execute(projected_stmt).all()}
+
     return {
-        "items": [serialize_product(doc, *commercial[doc["_id"]]) for doc in docs],
+        "items": [
+            serialize_product_row(doc, commercial[doc["_id"]])
+            for doc in docs
+            if doc["_id"] in commercial
+        ],
         "total": count,
         "page": page,
         "page_size": page_size,
@@ -117,14 +194,18 @@ def categories():
 @router.get("/products")
 def list_products(
     page: int = Query(1, ge=1),
-    page_size: int = Query(12, ge=1, le=100),
+    page_size: int = Query(15, ge=1, le=100),
     category: str | None = None,
     brand: str | None = None,
     q: str | None = Query(None, max_length=200),
     filters: str | None = Query(None, max_length=2000),
+    min_price: Decimal | None = Query(None, ge=0),
+    max_price: Decimal | None = Query(None, ge=0),
     db: Session = Depends(get_db),
 ):
-    return product_list(db, page, page_size, category, brand, q, filters)
+    return product_list(
+        db, page, page_size, category, brand, q, filters, min_price, max_price
+    )
 
 
 @router.get("/admin/products")
@@ -135,16 +216,37 @@ def admin_products(
     user: User = Depends(admin),
     db: Session = Depends(get_db),
 ):
-    return product_list(db, page, page_size, None, None, q, None, True)
+    return product_list(db, page, page_size, None, None, q, None, None, None, True)
 
 
 @router.get("/products/{product_id}")
 def get_product(product_id: UUID, db: Session = Depends(get_db)):
+    str_id = str(product_id)
+    if str_id in BUILDER_PARTS:
+        ensure_builder_item(db, product_id)
+        item, stock = db.get(SellableItem, product_id), db.get(Inventory, product_id)
+        part = BUILDER_PARTS[str_id]
+        return {
+            "id": str_id,
+            "sku": item.sku,
+            "slug": part["slug"],
+            "name": part["name"],
+            "brand": part["brand"],
+            "category": part["category"],
+            "price": str(item.price),
+            "currency": item.currency,
+            "quantity": stock.quantity,
+            "active": item.active,
+            "description": part["description"],
+            "images": [],
+            "specifications": part["specs"],
+        }
     doc = catalog.products.find_one({"_id": str(product_id)})
     item, stock = db.get(SellableItem, product_id), db.get(Inventory, product_id)
     if not doc or not item or not stock or not item.active or item.catalog_pending:
         raise HTTPException(404, "Product is unavailable")
     return serialize_product(doc, item, stock)
+
 
 
 @router.post("/products", status_code=201)
@@ -252,3 +354,28 @@ def adjust_inventory(
     stock.quantity += body.delta
     db.commit()
     return {"quantity": stock.quantity}
+
+
+@router.post("/products/{product_id}/inventory/occ")
+def adjust_inventory_occ(
+    product_id: UUID,
+    body: StockAdjustment,
+    version_timestamp: str | None = Query(None, description="ISO timestamp token for Optimistic Concurrency Control"),
+    user: User = Depends(admin),
+    db: Session = Depends(get_db),
+):
+    """CP3 Option A: Optimistic Concurrency Control (OCC) using version/timestamp token.
+
+    Returns HTTP 409 Conflict if a concurrent mutation modified the record since version_timestamp.
+    """
+    stock = db.get(Inventory, product_id)
+    if not stock:
+        raise HTTPException(404, "Inventory record not found")
+    if version_timestamp and stock.updated_at.isoformat() != version_timestamp:
+        raise HTTPException(409, "OCC Conflict: Resource was modified by another concurrent transaction. Please retry.")
+    if stock.quantity + body.delta < 0:
+        raise HTTPException(409, "Stock cannot become negative")
+    stock.quantity += body.delta
+    db.commit()
+    return {"quantity": stock.quantity, "version_timestamp": stock.updated_at.isoformat()}
+
