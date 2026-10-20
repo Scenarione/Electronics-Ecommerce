@@ -6,11 +6,13 @@ from uuid import NAMESPACE_URL, uuid5
 
 from sqlalchemy import func, select
 
+from .builder_catalog import ensure_all_builder_items
 from .catalog_setup import CATEGORIES, initialize_catalog
 from .config import settings
 from .db import SessionLocal, catalog
 from .models import Inventory, Order, OrderItem, Payment, SellableItem, User
 from .security import passwords
+
 
 
 def stable_id(value):
@@ -193,8 +195,10 @@ def seed():
             if success:
                 stock.quantity -= 1
             db.commit()
+        ensure_all_builder_items(db)
         counts = {
             model.__tablename__: db.scalar(select(func.count()).select_from(model))
+
             for model in (User, SellableItem, Inventory, Order, OrderItem, Payment)
         }
     print(
