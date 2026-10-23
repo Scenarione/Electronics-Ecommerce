@@ -11,6 +11,16 @@ playwright-report/
 .tmp/
 *.tsbuildinfo
 .ruff_cache/
+.backfill_checkpoint.json
 # The UI is being designed after Checkpoint 1 and is intentionally excluded
 # from the CP1 submission commit.
 /frontend/
+
+# Local tooling, internal notes & agents
+.agents/
+skills-lock.json
+package.json
+package-lock.json
+DESIGN.md
+CHECKPOINT_*.md
+VERIFICATION.md
