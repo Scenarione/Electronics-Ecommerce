@@ -1,0 +1,87 @@
+@import "tailwindcss";
+
+@theme {
+  --color-canvas-night: #000000;
+  --color-canvas-night-elevated: #0a0a0a;
+  --color-surface-elevated-dark: #1e2c31;
+  --color-hairline-dark: #1e2c31;
+  --color-hairline-light: #e4e4e7;
+  --color-aloe: #c1fbd4;
+  --color-pistachio: #d4f9e0;
+  --color-shade-30: #d4d4d8;
+  --color-shade-40: #a1a1aa;
+  --color-shade-50: #71717a;
+  --color-shade-60: #52525b;
+  --color-shade-70: #3f3f46;
+  --color-link-cool-1: #9dabad;
+  --color-link-cool-2: #9797a2;
+  --color-link-mint: #99b3ad;
+  --color-on-primary: #ffffff;
+  --color-ink: #000000;
+
+  --font-display:
+    "NeueHaasGrotesk Display", "Inter Display", -apple-system,
+    BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-ui:
+    "Inter Variable", "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-code: "ui-monospace", "SFMono-Regular", "Menlo", monospace;
+}
+
+/* Strictly enforce ss03 OpenType stylistic set from DESIGN.md */
+.flagship-section,
+.flagship-section * {
+  font-feature-settings: "ss03" 1;
+}
+
+/* 3D Hardware Canvas perspective for scrubbed rotation */
+.perspective-1200 {
+  perspective: 1200px;
+  transform-style: preserve-3d;
+}
+
+.preserve-3d {
+  transform-style: preserve-3d;
+}
+
+.backface-hidden {
+  backface-visibility: hidden;
+}
+
+/* Design Tokens helper utilities matching DESIGN.md */
+.display-xxl {
+  font-family: var(--font-display);
+  font-size: clamp(3rem, 7vw, 6rem);
+  font-weight: 300;
+  line-height: 1;
+  letter-spacing: 0.025em;
+}
+
+.display-xl {
+  font-family: var(--font-display);
+  font-size: clamp(2.5rem, 5vw, 4.375rem);
+  font-weight: 300;
+  line-height: 1.05;
+  letter-spacing: 0;
+}
+
+.display-lg {
+  font-family: var(--font-display);
+  font-size: clamp(2rem, 4vw, 3.4375rem);
+  font-weight: 300;
+  line-height: 1.16;
+  letter-spacing: 0;
+}
+
+.heading-xl {
+  font-family: var(--font-display);
+  font-size: 1.75rem;
+  font-weight: 500;
+  line-height: 1.28;
+  letter-spacing: 0.015em;
+}
+
+/* Magnetic button physics container */
+.magnetic-btn-wrap {
+  display: inline-block;
+  will-change: transform;
+}
