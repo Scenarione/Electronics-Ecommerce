@@ -41,12 +41,18 @@ services:
     depends_on:
       postgres_db: {condition: service_healthy}
       mongo_db: {condition: service_healthy}
-    command: ["sh", "-c", "alembic upgrade head && python -m app.catalog_setup && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+    command: ["sh", "-c", "alembic upgrade ${ALEMBIC_TARGET:-9b106b057c41} && python -m app.catalog_setup && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health')"]
       interval: 10s
       timeout: 5s
       retries: 10
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      api: {condition: service_healthy}
 volumes:
   postgres_data:
   mongo_data:
